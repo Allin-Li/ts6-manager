@@ -2,7 +2,7 @@ import type { PrismaClient } from '../../generated/prisma/index.js';
 import { VoiceBotManager } from './voice-bot-manager.js';
 import type { VoiceBot } from './voice-bot.js';
 import type { QueueItem } from './playlist/queue.js';
-import { downloadYouTube } from './audio/youtube.js';
+import { downloadYouTube, getYouTubeUrlInfo } from './audio/youtube.js';
 
 const MUSIC_DIR = process.env.MUSIC_DIR || '/data/music';
 const CMD_PREFIX = '!';
@@ -195,14 +195,18 @@ export class MusicCommandHandler {
     this.reply(bot, userClid, 'Loading...');
 
     try {
-      const { filePath, info } = await downloadYouTube(args, MUSIC_DIR);
+      // Stream instead of download to avoid loading full audio into memory
+      const { items } = await getYouTubeUrlInfo(args);
+      if (items.length === 0) throw new Error('No video found for URL');
+      const info = items[0];
 
       const queueItem: QueueItem = {
         id: `yt_${info.id}`,
         title: info.title,
-        artist: info.artist,
+        artist: info.artist || '',
         duration: info.duration,
-        filePath,
+        filePath: '',
+        streamUrl: args,  // resolved to direct URL lazily in playStream()
         source: 'youtube',
         sourceUrl: args,
       };
@@ -217,7 +221,7 @@ export class MusicCommandHandler {
         this.reply(bot, userClid, `Queued: ${info.artist} - ${info.title} (position #${bot.queue.length})`);
       } else {
         bot.queue.playAt(bot.queue.length - 1);
-        await bot.play(queueItem);
+        await bot.playStream(queueItem);
         this.reply(bot, userClid, `Now playing: ${info.artist} - ${info.title}`);
       }
     } catch (err: any) {

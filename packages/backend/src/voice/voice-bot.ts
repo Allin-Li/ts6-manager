@@ -10,6 +10,32 @@ import { STREAM_PRESETS, DEFAULT_PRESET, type VideoViewerInfo, type VideoStreamS
 import { getCookieArgs } from './audio/youtube.js';
 import { spawn } from 'child_process';
 
+/** Resolve a YouTube URL to a direct audio stream URL */
+function resolveAudioUrl(url: string): Promise<string> {
+  if (!url.includes('youtube.com/') && !url.includes('youtu.be/')) {
+    return Promise.resolve(url);
+  }
+  return new Promise((resolve, reject) => {
+    const proc = spawn('yt-dlp', [
+      '-f', 'bestaudio[ext=webm]/bestaudio/best',
+      '--no-playlist',
+      '-g',
+      url,
+    ], { shell: false });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    proc.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`yt-dlp failed (code ${code}): ${stderr.slice(0, 200)}`));
+      const directUrl = stdout.trim().split('\n')[0];
+      if (!directUrl) return reject(new Error('yt-dlp returned no URL'));
+      resolve(directUrl);
+    });
+    proc.on('error', (err) => reject(new Error(`yt-dlp not found: ${err.message}`)));
+  });
+}
+
 /** Resolve a YouTube/yt-dlp-compatible URL to a direct stream URL */
 function resolveVideoUrl(url: string, maxHeight: number = 720): Promise<string> {
   // Only resolve YouTube and other yt-dlp-supported sites
@@ -404,7 +430,9 @@ export class VoiceBot extends EventEmitter {
     this.startIcyPolling(item.streamUrl);
 
     try {
-      const stream = await this.pipeline.toPcmStream(item.streamUrl);
+      // Resolve YouTube URLs to direct stream URL just-in-time (avoids expiry issues)
+      const resolvedUrl = await resolveAudioUrl(item.streamUrl!);
+      const stream = await this.pipeline.toPcmStream(resolvedUrl);
       this.streamKill = stream.kill;
       this.streamChunks = [];
       this.streamChunksSize = 0;
