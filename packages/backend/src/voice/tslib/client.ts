@@ -135,6 +135,14 @@ export class Ts3Client extends EventEmitter {
   }
 
   async connect(opts: Ts3ClientOptions): Promise<void> {
+    // Fix: remove accumulated once-listeners from previous failed connect() calls
+    this.removeAllListeners('connected');
+    this.removeAllListeners('error');
+    // Fix: close previous socket if it wasn't properly cleaned up
+    if (this.socket) {
+      try { this.socket.removeAllListeners(); this.socket.close(); } catch (_) {}
+      this.socket = null;
+    }
     this.opts = opts;
     this.state = "init";
     this.cryptoInitComplete = false;
