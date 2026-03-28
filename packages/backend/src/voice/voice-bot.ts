@@ -467,7 +467,20 @@ export class VoiceBot extends EventEmitter {
         this.emit('statusChange', this._status);
       });
 
-      let nextDue = performance.now() + 200; // initial buffer delay
+      // Wait until we have at least 3 seconds buffered to absorb hypervisor steal time spikes
+      const PRE_BUFFER_MS = 3000;
+      const PRE_BUFFER_BYTES = Math.floor(PRE_BUFFER_MS / FRAME_MS) * BYTES_PER_FRAME;
+      await new Promise<void>((resolve) => {
+        const checkBuffer = () => {
+          if (this.loopEpoch !== epoch) return resolve();
+          if (this.streamChunksSize >= PRE_BUFFER_BYTES) return resolve();
+          setTimeout(checkBuffer, 50);
+        };
+        checkBuffer();
+      });
+      if (this.loopEpoch !== epoch) return;
+
+      let nextDue = performance.now() + FRAME_MS;
 
       const tick = () => {
         if (epoch !== this.loopEpoch) return;
